@@ -344,7 +344,8 @@ class MainActivity : AppCompatActivity() {
                     featureHeight,
                     featureWidth,
                     batchTargets,
-                    lr
+                    lr,
+                    labelSmoothing = 0.1f
                 )
 
                 withContext(Dispatchers.Main) {

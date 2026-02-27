@@ -81,7 +81,7 @@ class TrainableHead(val inputDim: Int, val numClasses: Int) {
      * Logits: Output of forward pass (before softmax) [Batch, NumClasses]
      * Targets: Class indices [Batch]
      */
-    fun trainStep(input: FloatArray, batchSize: Int, channels: Int, height: Int, width: Int, targets: IntArray, learningRate: Float): Float {
+    fun trainStep(input: FloatArray, batchSize: Int, channels: Int, height: Int, width: Int, targets: IntArray, learningRate: Float, labelSmoothing: Float = 0.1f): Float {
         // 1. GAP
         var gapOutput = globalAveragePool(input, batchSize, channels, height, width)
 
@@ -109,7 +109,7 @@ class TrainableHead(val inputDim: Int, val numClasses: Int) {
             }
         }
 
-        // 4. Softmax & Loss
+        // 4. Softmax & Loss (with Label Smoothing)
         val probs = FloatArray(logits.size)
         var totalLoss = 0f
 
@@ -126,20 +126,30 @@ class TrainableHead(val inputDim: Int, val numClasses: Int) {
             }
             for (i in 0 until numClasses) probs[offset + i] /= sum
 
-            // Cross Entropy Loss
-            val p = probs[offset + targets[b]]
-            totalLoss -= kotlin.math.ln(maxOf(p, 1e-7f))
+            // Cross Entropy Loss with Label Smoothing
+            // Target distribution: (1 - epsilon) * one_hot + epsilon / numClasses
+            val targetIdx = targets[b]
+            for (i in 0 until numClasses) {
+                var targetProb = labelSmoothing / numClasses
+                if (i == targetIdx) {
+                    targetProb += (1.0f - labelSmoothing)
+                }
+                totalLoss -= targetProb * kotlin.math.ln(maxOf(probs[offset + i], 1e-7f))
+            }
         }
 
         // 5. Backward
-        // dL/dLogits = probs - one_hot(target)
+        // dL/dLogits = probs - target_distribution
         val dLogits = FloatArray(logits.size)
         for (b in 0 until batchSize) {
+            val targetIdx = targets[b]
             for (c in 0 until numClasses) {
-                dLogits[b * numClasses + c] = probs[b * numClasses + c]
-                if (c == targets[b]) {
-                    dLogits[b * numClasses + c] -= 1f
+                var targetProb = labelSmoothing / numClasses
+                if (c == targetIdx) {
+                    targetProb += (1.0f - labelSmoothing)
                 }
+
+                dLogits[b * numClasses + c] = probs[b * numClasses + c] - targetProb
                 dLogits[b * numClasses + c] /= batchSize.toFloat() // Average gradients
             }
         }

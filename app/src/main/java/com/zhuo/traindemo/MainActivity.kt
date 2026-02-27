@@ -23,6 +23,7 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.zhuo.traindemo.data.Dataset
 import com.zhuo.traindemo.model.FeatureExtractor
+import com.zhuo.traindemo.model.ModelManager
 import com.zhuo.traindemo.model.TrainableHead
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +47,7 @@ class MainActivity : AppCompatActivity() {
     private val dataset = Dataset()
     private lateinit var featureExtractor: FeatureExtractor
     private var trainableHead: TrainableHead? = null
+    private lateinit var modelManager: ModelManager
 
     private val classLabels = mutableListOf("Class 0", "Class 1")
     private lateinit var labelAdapter: ArrayAdapter<String>
@@ -82,8 +84,20 @@ class MainActivity : AppCompatActivity() {
         // Initialize Feature Extractor
         try {
             featureExtractor = FeatureExtractor(this)
-            // Initialize Head
-            trainableHead = TrainableHead(featureChannels, classLabels.size)
+            modelManager = ModelManager(this)
+
+            // Try to load model
+            val loaded = modelManager.loadModel()
+            if (loaded != null) {
+                trainableHead = loaded.first
+                classLabels.clear()
+                classLabels.addAll(loaded.second)
+                labelAdapter.notifyDataSetChanged()
+                Toast.makeText(this, "Loaded saved model", Toast.LENGTH_SHORT).show()
+            } else {
+                // Initialize Head
+                trainableHead = TrainableHead(featureChannels, classLabels.size)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing models", e)
             txtStatus.text = "Error: ${e.message}"
@@ -294,6 +308,11 @@ class MainActivity : AppCompatActivity() {
                 // Check if user stopped
                 if (!isTraining) break
             }
+            // Training finished or stopped
+            withContext(Dispatchers.Main) {
+                stopTraining()
+                txtStatus.text = "Training Complete. Resuming Inference."
+            }
         }
     }
 
@@ -302,7 +321,20 @@ class MainActivity : AppCompatActivity() {
         isAnalyzing = true
         btnTrain.text = "Train"
         btnCapture.isEnabled = true
-        trainingJob?.cancel()
+        // trainingJob?.cancel() // Don't cancel immediately if called from within the job
+
+        // Save model
+        trainableHead?.let {
+            modelManager.saveModel(it, classLabels)
+            Toast.makeText(this, "Model Saved", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (isTraining) {
+             stopTraining()
+        }
     }
 
     private fun addNewClass() {

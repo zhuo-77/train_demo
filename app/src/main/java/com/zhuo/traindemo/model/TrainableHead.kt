@@ -15,7 +15,7 @@ class TrainableHead(val inputDim: Int, val numClasses: Int) {
     private var vWeights = FloatArray(weights.size)
     private var mBias = FloatArray(bias.size)
     private var vBias = FloatArray(bias.size)
-    private var t = 0
+    var t = 0
 
     // Hyperparameters
     private val beta1 = 0.9f

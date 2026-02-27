@@ -22,6 +22,8 @@ class TrainableHead(val inputDim: Int, val numClasses: Int) {
     private val beta2 = 0.999f
     private val epsilon = 1e-8f
     private val dropoutRate = 0.5f // 50% dropout
+    private val weightDecay = 0.05f // L2 regularization for AdamW
+    private val maxGradNorm = 2.0f // Gradient clipping threshold
     private val random = Random()
 
     init {
@@ -167,10 +169,24 @@ class TrainableHead(val inputDim: Int, val numClasses: Int) {
             dBias[j] = sum
         }
 
-        // 6. Update (Adam)
+        // Gradient Clipping (L2 Norm)
+        var globalNormSq = 0f
+        for(g in dWeights) globalNormSq += g*g
+        for(g in dBias) globalNormSq += g*g
+        val globalNorm = kotlin.math.sqrt(globalNormSq)
+
+        // If global norm is greater than threshold, clip gradients
+        if (globalNorm > maxGradNorm) {
+            val scale = maxGradNorm / (globalNorm + 1e-6f) // Add epsilon to avoid div by zero
+            for(i in dWeights.indices) dWeights[i] *= scale
+            for(i in dBias.indices) dBias[i] *= scale
+        }
+
+        // 6. Update (AdamW)
         t++
-        adamUpdate(weights, dWeights, mWeights, vWeights, learningRate)
-        adamUpdate(bias, dBias, mBias, vBias, learningRate)
+        // AdamW: Decay weights before Adam update, but only if applyDecay is true
+        adamWUpdate(weights, dWeights, mWeights, vWeights, learningRate, applyDecay = true)
+        adamWUpdate(bias, dBias, mBias, vBias, learningRate, applyDecay = false) // Usually no weight decay on bias
 
         return totalLoss / batchSize
     }
@@ -196,11 +212,20 @@ class TrainableHead(val inputDim: Int, val numClasses: Int) {
         return output
     }
 
-    private fun adamUpdate(params: FloatArray, grads: FloatArray, m: FloatArray, v: FloatArray, lr: Float) {
+    private fun adamWUpdate(params: FloatArray, grads: FloatArray, m: FloatArray, v: FloatArray, lr: Float, applyDecay: Boolean) {
         val beta1Pow = Math.pow(beta1.toDouble(), t.toDouble()).toFloat()
         val beta2Pow = Math.pow(beta2.toDouble(), t.toDouble()).toFloat()
 
+        // Typical AdamW applies decay like: theta = theta - lr * (grad + decay * theta)
+        // Decoupled: theta = theta - lr * decay * theta - lr * adam_step
+
         for (i in params.indices) {
+            // Apply weight decay
+            if (applyDecay) {
+                params[i] = params[i] * (1.0f - lr * weightDecay)
+            }
+
+            // Adam Update
             m[i] = beta1 * m[i] + (1 - beta1) * grads[i]
             v[i] = beta2 * v[i] + (1 - beta2) * grads[i] * grads[i]
 

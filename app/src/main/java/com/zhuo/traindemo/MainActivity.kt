@@ -10,6 +10,9 @@ import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.Spinner
+import android.util.Size
+import android.view.View
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,6 +46,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnTrain: Button
     private lateinit var btnAddClass: Button
     private lateinit var spinnerLabel: Spinner
+    private lateinit var progressBar: ProgressBar
 
     private val dataset = Dataset()
     private lateinit var featureExtractor: FeatureExtractor
@@ -75,6 +79,7 @@ class MainActivity : AppCompatActivity() {
         btnTrain = findViewById(R.id.btnTrain)
         btnAddClass = findViewById(R.id.btnAddClass)
         spinnerLabel = findViewById(R.id.spinnerLabel)
+        progressBar = findViewById(R.id.progressBar)
 
         // Initialize Spinner
         labelAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, classLabels)
@@ -145,13 +150,17 @@ class MainActivity : AppCompatActivity() {
         cameraProviderFuture.addListener({
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
 
+            val targetResolution = Size(640, 480)
+
             val preview = Preview.Builder()
+                .setTargetResolution(targetResolution)
                 .build()
                 .also {
                     it.setSurfaceProvider(viewFinder.surfaceProvider)
                 }
 
             val imageAnalyzer = ImageAnalysis.Builder()
+                .setTargetResolution(targetResolution)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
                 .also {
@@ -251,8 +260,11 @@ class MainActivity : AppCompatActivity() {
 
         isTraining = true
         isAnalyzing = false // Pause inference updates
-        btnTrain.text = "Stop Training"
+        btnTrain.text = "Stop"
         btnCapture.isEnabled = false
+        progressBar.visibility = View.VISIBLE
+        progressBar.max = 100
+        progressBar.progress = 0
 
         trainingJob = trainScope.launch {
             val batchSize = 16
@@ -302,7 +314,8 @@ class MainActivity : AppCompatActivity() {
                 )
 
                 withContext(Dispatchers.Main) {
-                    txtStatus.text = "Epoch $epoch, Loss: ${String.format("%.4f", loss)}"
+                    txtStatus.text = "Epoch $epoch/$epochs, Loss: ${String.format("%.4f", loss)}"
+                    progressBar.progress = epoch
                 }
 
                 // Check if user stopped
@@ -321,6 +334,7 @@ class MainActivity : AppCompatActivity() {
         isAnalyzing = true
         btnTrain.text = "Train"
         btnCapture.isEnabled = true
+        progressBar.visibility = View.GONE
         // trainingJob?.cancel() // Don't cancel immediately if called from within the job
 
         // Save model

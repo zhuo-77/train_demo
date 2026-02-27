@@ -20,18 +20,30 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        app:layout_constraintGuide_percent="0.6" />
+        app:layout_constraintGuide_percent="0.55" />
+
+    <ProgressBar
+        android:id="@+id/progressBar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:max="100"
+        android:progress="0"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="@+id/guideline"
+        tools:visibility="visible" />
 
     <ImageView
         android:id="@+id/imgPreview"
-        android:layout_width="100dp"
-        android:layout_height="100dp"
+        android:layout_width="80dp"
+        android:layout_height="80dp"
         android:layout_margin="16dp"
         android:background="#CCCCCC"
-        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/guideline"
-        app:layout_constraintVertical_bias="0.1" />
+        app:layout_constraintTop_toBottomOf="@+id/progressBar" />
 
     <TextView
         android:id="@+id/txtStatus"
@@ -40,47 +52,67 @@
         android:layout_margin="16dp"
         android:text="Status: Ready"
         android:textSize="14sp"
+        android:maxLines="2"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toEndOf="@+id/imgPreview"
-        app:layout_constraintTop_toBottomOf="@+id/guideline" />
+        app:layout_constraintTop_toBottomOf="@+id/progressBar" />
 
-    <Button
-        android:id="@+id/btnCapture"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Capture"
-        app:layout_constraintBottom_toTopOf="@+id/btnTrain"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@+id/imgPreview"
-        app:layout_constraintTop_toBottomOf="@+id/txtStatus" />
-
-    <Spinner
-        android:id="@+id/spinnerLabel"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        app:layout_constraintBottom_toBottomOf="@+id/btnCapture"
-        app:layout_constraintEnd_toStartOf="@+id/btnCapture"
-        app:layout_constraintStart_toEndOf="@+id/imgPreview"
-        app:layout_constraintTop_toTopOf="@+id/btnCapture" />
-
-    <Button
-        android:id="@+id/btnTrain"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Train"
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:gravity="center_horizontal"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toEndOf="@+id/imgPreview"
-        app:layout_constraintTop_toBottomOf="@+id/btnCapture" />
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/imgPreview">
 
-    <Button
-        android:id="@+id/btnAddClass"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Add Class"
-        app:layout_constraintBottom_toBottomOf="@+id/btnTrain"
-        app:layout_constraintEnd_toStartOf="@+id/btnTrain"
-        app:layout_constraintStart_toEndOf="@+id/imgPreview"
-        app:layout_constraintTop_toTopOf="@+id/btnTrain" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <Spinner
+                android:id="@+id/spinnerLabel"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp" />
+
+            <Button
+                android:id="@+id/btnCapture"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Capture" />
+        </LinearLayout>
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="16dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <Button
+                android:id="@+id/btnAddClass"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="New Class"
+                android:layout_marginEnd="8dp"/>
+
+            <Button
+                android:id="@+id/btnTrain"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Train"
+                android:layout_marginStart="8dp"/>
+        </LinearLayout>
+
+    </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

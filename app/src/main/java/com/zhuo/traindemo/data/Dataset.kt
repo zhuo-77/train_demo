@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
 import java.util.Random
@@ -36,22 +37,37 @@ class Dataset {
     }
 
     private fun augment(original: LabeledImage): LabeledImage {
-        // Simple augmentations: Random Crop, Random Erase, Color Jitter
+        // Mainstream augmentations applied sequentially and independently
         var bitmap = original.bitmap.copy(Bitmap.Config.ARGB_8888, true)
 
+        // 1. Random Horizontal Flip (50%)
+        if (random.nextBoolean()) {
+            val flipped = horizontalFlip(bitmap)
+            // If flip fails or returns same (shouldn't happen with Matrix logic but being safe), use original
+            bitmap = flipped
+        }
+
+        // 2. Random Crop (50%)
         if (random.nextBoolean()) {
             bitmap = randomCrop(bitmap)
         }
 
+        // 3. Color Jitter (50%)
         if (random.nextBoolean()) {
              bitmap = colorJitter(bitmap)
         }
 
+        // 4. Random Erase (50%)
         if (random.nextBoolean()) {
             bitmap = randomErase(bitmap)
         }
 
         return LabeledImage(bitmap, original.label)
+    }
+
+    private fun horizontalFlip(bitmap: Bitmap): Bitmap {
+        val matrix = Matrix().apply { preScale(-1f, 1f) }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
     private fun randomCrop(bitmap: Bitmap): Bitmap {

@@ -25,6 +25,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.zhuo.traindemo.data.Dataset
+import com.zhuo.traindemo.model.BackboneType
 import com.zhuo.traindemo.model.FeatureExtractor
 import com.zhuo.traindemo.model.ModelManager
 import com.zhuo.traindemo.model.TrainableClassifier
@@ -50,6 +51,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnAddClass: Button
     private lateinit var spinnerLabel: Spinner
     private lateinit var spinnerTrainMode: Spinner
+    private lateinit var spinnerBackbone: Spinner
     private lateinit var progressBar: ProgressBar
 
     private val dataset = Dataset()
@@ -61,16 +63,14 @@ class MainActivity : AppCompatActivity() {
     private val classLabels = mutableListOf("Class 0", "Class 1")
     private lateinit var labelAdapter: ArrayAdapter<String>
     private val trainingModes = listOf("Head Only", "Semi-Frozen")
+    private val backboneTypes = BackboneType.entries
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private var isTraining = false
     private var isAnalyzing = true
 
-    // Model parameters for YOLOv8n-cls backbone
-    private val backboneChannels = 256  // YOLOv8n-cls backbone output channels
-    private val convOutChannels = 1280 // Classify Conv output channels
-    private val featureHeight = 7
-    private val featureWidth = 7
+    // Current backbone type (updated by spinner)
+    private var currentBackbone = BackboneType.YOLOV8N_CLS
 
     private val trainExecutor = Executors.newFixedThreadPool(4)
     private val trainDispatcher = trainExecutor.asCoroutineDispatcher()
@@ -94,6 +94,7 @@ class MainActivity : AppCompatActivity() {
         btnAddClass = findViewById(R.id.btnAddClass)
         spinnerLabel = findViewById(R.id.spinnerLabel)
         spinnerTrainMode = findViewById(R.id.spinnerTrainMode)
+        spinnerBackbone = findViewById(R.id.spinnerBackbone)
         progressBar = findViewById(R.id.progressBar)
 
         // Initialize Label Spinner
@@ -106,9 +107,17 @@ class MainActivity : AppCompatActivity() {
         modeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinnerTrainMode.adapter = modeAdapter
 
+        // Initialize Backbone Spinner
+        val backboneNames = backboneTypes.map { it.displayName }
+        val backboneAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, backboneNames)
+        backboneAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spinnerBackbone.adapter = backboneAdapter
+        // Default to YOLOv8n-cls
+        spinnerBackbone.setSelection(backboneTypes.indexOf(BackboneType.YOLOV8N_CLS))
+
         // Initialize Feature Extractor
         try {
-            featureExtractor = FeatureExtractor(this)
+            featureExtractor = FeatureExtractor(this, currentBackbone.onnxAsset)
             modelManager = ModelManager(this)
 
             // Try to load saved classifier first, then fall back to head-only model
@@ -157,6 +166,16 @@ class MainActivity : AppCompatActivity() {
 
         btnAddClass.setOnClickListener {
             addNewClass()
+        }
+
+        spinnerBackbone.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val selected = backboneTypes[position]
+                if (selected != currentBackbone) {
+                    switchBackbone(selected)
+                }
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
         }
     }
 
@@ -259,7 +278,7 @@ class MainActivity : AppCompatActivity() {
             if (trainableClassifier != null && !isTraining) {
                 val features = featureExtractor.extract(rotatedBitmap)
                 // Classifier expects: backboneFeatures, batch, height, width
-                val logits = trainableClassifier!!.forward(features, 1, featureHeight, featureWidth)
+                val logits = trainableClassifier!!.forward(features, 1, currentBackbone.featureHeight, currentBackbone.featureWidth)
 
                 // Argmax
                 var maxIdx = -1
@@ -351,7 +370,7 @@ class MainActivity : AppCompatActivity() {
                 if (batch.isEmpty()) continue
 
                 // Extract features and stack into batch
-                val batchInput = FloatArray(batchSize * backboneChannels * featureHeight * featureWidth)
+                val batchInput = FloatArray(batchSize * currentBackbone.backboneChannels * currentBackbone.featureHeight * currentBackbone.featureWidth)
                 val batchTargets = IntArray(batchSize)
 
                 for (i in 0 until batchSize) {
@@ -365,8 +384,8 @@ class MainActivity : AppCompatActivity() {
                 val loss = classifier.trainStep(
                     batchInput,
                     batchSize,
-                    featureHeight,
-                    featureWidth,
+                    currentBackbone.featureHeight,
+                    currentBackbone.featureWidth,
                     batchTargets,
                     lr,
                     trainingMode,
@@ -424,24 +443,57 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Switch to a different backbone model.
+     * Re-initializes the feature extractor and classifier.
+     */
+    private fun switchBackbone(backbone: BackboneType) {
+        if (isTraining) {
+            Toast.makeText(this, "Cannot switch backbone during training", Toast.LENGTH_SHORT).show()
+            // Reset spinner to current backbone
+            spinnerBackbone.setSelection(backboneTypes.indexOf(currentBackbone))
+            return
+        }
+
+        try {
+            currentBackbone = backbone
+            featureExtractor = FeatureExtractor(this, currentBackbone.onnxAsset)
+            dataset.clear()
+            initClassifier()
+            txtStatus.text = "Switched to ${currentBackbone.displayName}"
+            Toast.makeText(this, "Backbone: ${currentBackbone.displayName}. Classifier reset.", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error switching backbone", e)
+            txtStatus.text = "Error: ${e.message}"
+        }
+    }
+
+    /**
      * Initialize or re-initialize the TrainableClassifier.
-     * Tries to load pretrained Conv+BN weights from assets;
+     * Tries to load pretrained Conv+BN weights from assets for the current backbone;
      * the linear head is always re-initialized for the current number of classes.
      */
     private fun initClassifier() {
-        val pretrainedConv = modelManager.loadPretrainedConvWeights("yolov8n_cls_head_weights.bin")
-        val classifier = TrainableClassifier(backboneChannels, convOutChannels, classLabels.size)
+        val classifier = TrainableClassifier(
+            currentBackbone.backboneChannels,
+            currentBackbone.convOutChannels,
+            classLabels.size
+        )
 
-        if (pretrainedConv != null) {
-            // Use pretrained Conv+BN weights
-            classifier.convBlock.convWeight = pretrainedConv.convWeight
-            classifier.convBlock.bnGamma = pretrainedConv.bnGamma
-            classifier.convBlock.bnBeta = pretrainedConv.bnBeta
-            classifier.convBlock.bnRunningMean = pretrainedConv.bnRunningMean
-            classifier.convBlock.bnRunningVar = pretrainedConv.bnRunningVar
-            Log.d(TAG, "Loaded pretrained Conv+BN weights")
+        val weightsAsset = currentBackbone.pretrainedWeightsAsset
+        if (weightsAsset != null) {
+            val pretrainedConv = modelManager.loadPretrainedConvWeights(weightsAsset)
+            if (pretrainedConv != null) {
+                classifier.convBlock.convWeight = pretrainedConv.convWeight
+                classifier.convBlock.bnGamma = pretrainedConv.bnGamma
+                classifier.convBlock.bnBeta = pretrainedConv.bnBeta
+                classifier.convBlock.bnRunningMean = pretrainedConv.bnRunningMean
+                classifier.convBlock.bnRunningVar = pretrainedConv.bnRunningVar
+                Log.d(TAG, "Loaded pretrained Conv+BN weights for ${currentBackbone.displayName}")
+            } else {
+                Log.w(TAG, "Pretrained Conv+BN weights not found, using random initialization")
+            }
         } else {
-            Log.w(TAG, "Pretrained Conv+BN weights not found, using random initialization")
+            Log.d(TAG, "No pretrained Conv+BN weights for ${currentBackbone.displayName}, using random initialization")
         }
 
         trainableClassifier = classifier

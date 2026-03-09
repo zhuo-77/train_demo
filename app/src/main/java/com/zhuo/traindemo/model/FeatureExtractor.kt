@@ -9,7 +9,7 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import ai.onnxruntime.OnnxTensor
 
-class FeatureExtractor(context: Context) {
+class FeatureExtractor(context: Context, modelAsset: String = "feature_extractor.onnx") {
 
     private val env: OrtEnvironment
     private val session: OrtSession
@@ -17,7 +17,7 @@ class FeatureExtractor(context: Context) {
     init {
         env = OrtEnvironment.getEnvironment()
         // Load model from assets
-        val modelBytes = context.assets.open("feature_extractor.onnx").readBytes()
+        val modelBytes = context.assets.open(modelAsset).readBytes()
         session = env.createSession(modelBytes)
     }
 

@@ -355,6 +355,7 @@ class MainActivity : AppCompatActivity() {
             val epochs = 30
             val initialLr = 0.001f
             val minLr = 0.00001f
+            val noAugEpochs = 5 // Disable augmentation for the last N epochs
 
             val modeLabel = if (trainingMode == TrainingMode.HEAD_ONLY) "Head Only" else "Semi-Frozen"
 
@@ -366,7 +367,8 @@ class MainActivity : AppCompatActivity() {
                 val progress = epoch.toFloat() / epochs
                 val lr = minLr + 0.5f * (initialLr - minLr) * (1 + kotlin.math.cos(Math.PI * progress)).toFloat()
 
-                val batch = dataset.getBatch(batchSize)
+                val useAugmentation = epoch <= (epochs - noAugEpochs)
+                val batch = dataset.getBatch(batchSize, augment = useAugmentation)
                 if (batch.isEmpty()) continue
 
                 // Extract features and stack into batch

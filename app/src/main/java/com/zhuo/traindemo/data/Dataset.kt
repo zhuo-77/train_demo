@@ -26,12 +26,16 @@ class Dataset {
 
     fun size(): Int = images.size
 
-    fun getBatch(batchSize: Int): List<LabeledImage> {
+    fun getBatch(batchSize: Int, augment: Boolean = true): List<LabeledImage> {
         if (images.isEmpty()) return emptyList()
         val batch = mutableListOf<LabeledImage>()
         for (i in 0 until batchSize) {
             val idx = random.nextInt(images.size)
-            batch.add(augment(images[idx]))
+            if (augment) {
+                batch.add(augment(images[idx]))
+            } else {
+                batch.add(images[idx])
+            }
         }
         return batch
     }

@@ -18,7 +18,7 @@ class TrainableConvBNSiLU(val inChannels: Int, val outChannels: Int) {
     // Conv2d(1x1) weights: [outChannels, inChannels] (no bias)
     var convWeight = FloatArray(outChannels * inChannels)
 
-    // BatchNorm parameters (gamma, beta are trainable; mean, var are frozen)
+    // BatchNorm parameters (gamma, beta are frozen; mean, var are frozen)
     var bnGamma = FloatArray(outChannels) { 1.0f }
     var bnBeta = FloatArray(outChannels)
     var bnRunningMean = FloatArray(outChannels)
@@ -29,13 +29,8 @@ class TrainableConvBNSiLU(val inChannels: Int, val outChannels: Int) {
     private var mConvW = FloatArray(convWeight.size)
     private var vConvW = FloatArray(convWeight.size)
 
-    // AdamW optimizer state for BN gamma
-    private var mBnGamma = FloatArray(outChannels)
-    private var vBnGamma = FloatArray(outChannels)
-
-    // AdamW optimizer state for BN beta
-    private var mBnBeta = FloatArray(outChannels)
-    private var vBnBeta = FloatArray(outChannels)
+    // Note: BN gamma/beta are NOT trained (frozen) to avoid training instability.
+    // Only conv weights have optimizer state.
 
     var t = 0
 
@@ -90,22 +85,20 @@ class TrainableConvBNSiLU(val inChannels: Int, val outChannels: Int) {
         // Backward through SiLU
         val dBnOut = siluBackward(bnOut, dOutput)
 
-        // Backward through BatchNorm (eval mode) — compute gradients only
-        val (dConvOut, dGamma, dBeta) = batchNormBackwardGrads(convOut, dBnOut, batchSize, height, width)
+        // Backward through BatchNorm (eval mode) — only propagate gradient, BN params are frozen
+        val (dConvOut, _, _) = batchNormBackwardGrads(convOut, dBnOut, batchSize, height, width)
 
         // Backward through Conv2d(1x1) — compute gradients only
         val (dInput, dWeight) = conv1x1BackwardGrads(input, dConvOut, batchSize, height, width)
 
-        // Clip all gradients together
-        clipGradients(dWeight, dGamma, dBeta)
+        // Clip conv weight gradients
+        clipGradients(dWeight)
 
-        // Increment step counter once for all parameter groups
+        // Increment step counter
         t++
 
-        // Update all parameters
+        // Update only conv weights (BN gamma/beta are frozen)
         adamWUpdate(convWeight, dWeight, mConvW, vConvW, learningRate, applyDecay = true)
-        adamWUpdate(bnGamma, dGamma, mBnGamma, vBnGamma, learningRate, applyDecay = false)
-        adamWUpdate(bnBeta, dBeta, mBnBeta, vBnBeta, learningRate, applyDecay = false)
 
         return dInput
     }
@@ -116,7 +109,7 @@ class TrainableConvBNSiLU(val inChannels: Int, val outChannels: Int) {
      * Conv2d with 1x1 kernel: effectively a matrix multiply at each spatial location.
      * output[b, co, h, w] = sum_{ci}(weight[co, ci] * input[b, ci, h, w])
      */
-    internal fun conv1x1Forward(
+    fun conv1x1Forward(
         input: FloatArray, batchSize: Int, height: Int, width: Int
     ): FloatArray {
         val output = FloatArray(batchSize * outChannels * height * width)
@@ -184,7 +177,7 @@ class TrainableConvBNSiLU(val inChannels: Int, val outChannels: Int) {
      * x_norm = (x - running_mean) / sqrt(running_var + eps)
      * output = gamma * x_norm + beta
      */
-    internal fun batchNormForward(
+    fun batchNormForward(
         input: FloatArray, batchSize: Int, height: Int, width: Int
     ): FloatArray {
         val output = FloatArray(input.size)
@@ -247,7 +240,7 @@ class TrainableConvBNSiLU(val inChannels: Int, val outChannels: Int) {
     /**
      * SiLU forward: silu(x) = x * sigmoid(x)
      */
-    internal fun siluForward(input: FloatArray): FloatArray {
+    fun siluForward(input: FloatArray): FloatArray {
         val output = FloatArray(input.size)
         for (i in input.indices) {
             val sigmoid = 1.0f / (1.0f + exp(-input[i]))
@@ -313,10 +306,6 @@ class TrainableConvBNSiLU(val inChannels: Int, val outChannels: Int) {
     fun resetOptimizer() {
         mConvW = FloatArray(convWeight.size)
         vConvW = FloatArray(convWeight.size)
-        mBnGamma = FloatArray(outChannels)
-        vBnGamma = FloatArray(outChannels)
-        mBnBeta = FloatArray(outChannels)
-        vBnBeta = FloatArray(outChannels)
         t = 0
     }
 }

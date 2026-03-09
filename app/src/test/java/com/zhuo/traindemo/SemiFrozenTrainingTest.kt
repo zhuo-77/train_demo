@@ -362,4 +362,74 @@ class SemiFrozenTrainingTest {
         assertTrue("Higher backbone LR should cause larger weight changes ($totalChange2 > $totalChange1)",
             totalChange2 > totalChange1)
     }
+
+    // ---- BN parameters should be frozen in both modes ----
+
+    @Test
+    fun testBnParamsFrozenInHeadOnly() {
+        val classifier = TrainableClassifier(2, 3, 2)
+        classifier.convBlock.convWeight = floatArrayOf(1f, 0f, 0f, 1f, 1f, 1f)
+        classifier.convBlock.bnGamma = FloatArray(3) { 1.0f }
+        classifier.convBlock.bnBeta = FloatArray(3) { 0.0f }
+        classifier.convBlock.bnRunningMean = FloatArray(3) { 0.0f }
+        classifier.convBlock.bnRunningVar = FloatArray(3) { 1.0f }
+
+        val input = floatArrayOf(1.0f, 0.5f)
+        val targets = intArrayOf(0)
+
+        val bnGammaBefore = classifier.convBlock.bnGamma.clone()
+        val bnBetaBefore = classifier.convBlock.bnBeta.clone()
+        val bnMeanBefore = classifier.convBlock.bnRunningMean.clone()
+        val bnVarBefore = classifier.convBlock.bnRunningVar.clone()
+
+        for (step in 0 until 10) {
+            classifier.trainStep(input, 1, 1, 1, targets, 0.01f, TrainingMode.HEAD_ONLY)
+        }
+
+        assertArrayEquals("BN gamma should not change in HEAD_ONLY mode",
+            bnGammaBefore, classifier.convBlock.bnGamma, 0f)
+        assertArrayEquals("BN beta should not change in HEAD_ONLY mode",
+            bnBetaBefore, classifier.convBlock.bnBeta, 0f)
+        assertArrayEquals("BN running mean should not change in HEAD_ONLY mode",
+            bnMeanBefore, classifier.convBlock.bnRunningMean, 0f)
+        assertArrayEquals("BN running var should not change in HEAD_ONLY mode",
+            bnVarBefore, classifier.convBlock.bnRunningVar, 0f)
+    }
+
+    @Test
+    fun testBnParamsFrozenInSemiFrozen() {
+        val classifier = TrainableClassifier(2, 3, 2)
+        classifier.convBlock.convWeight = floatArrayOf(1f, 0f, 0f, 1f, 1f, 1f)
+        classifier.convBlock.bnGamma = FloatArray(3) { 1.0f }
+        classifier.convBlock.bnBeta = FloatArray(3) { 0.0f }
+        classifier.convBlock.bnRunningMean = FloatArray(3) { 0.0f }
+        classifier.convBlock.bnRunningVar = FloatArray(3) { 1.0f }
+
+        val input = floatArrayOf(1.0f, 0.5f)
+        val targets = intArrayOf(0)
+
+        val bnGammaBefore = classifier.convBlock.bnGamma.clone()
+        val bnBetaBefore = classifier.convBlock.bnBeta.clone()
+        val bnMeanBefore = classifier.convBlock.bnRunningMean.clone()
+        val bnVarBefore = classifier.convBlock.bnRunningVar.clone()
+
+        for (step in 0 until 10) {
+            classifier.trainStep(input, 1, 1, 1, targets, 0.01f, TrainingMode.SEMI_FROZEN)
+        }
+
+        // Conv weights SHOULD change, but BN params should NOT
+        var convChanged = false
+        for (i in classifier.convBlock.convWeight.indices) {
+            if (classifier.convBlock.convWeight[i] != 0f) convChanged = true
+        }
+
+        assertArrayEquals("BN gamma should not change in SEMI_FROZEN mode",
+            bnGammaBefore, classifier.convBlock.bnGamma, 0f)
+        assertArrayEquals("BN beta should not change in SEMI_FROZEN mode",
+            bnBetaBefore, classifier.convBlock.bnBeta, 0f)
+        assertArrayEquals("BN running mean should not change in SEMI_FROZEN mode",
+            bnMeanBefore, classifier.convBlock.bnRunningMean, 0f)
+        assertArrayEquals("BN running var should not change in SEMI_FROZEN mode",
+            bnVarBefore, classifier.convBlock.bnRunningVar, 0f)
+    }
 }

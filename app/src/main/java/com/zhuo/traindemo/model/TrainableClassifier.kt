@@ -6,7 +6,7 @@ package com.zhuo.traindemo.model
 enum class TrainingMode {
     /** Only the linear head is trained; Conv+BN layers are frozen. */
     HEAD_ONLY,
-    /** Semi-frozen: head is trained with higher LR, Conv+BN with lower LR. */
+    /** Semi-frozen: head is trained with higher LR, Conv weights with lower LR. BN params are frozen. */
     SEMI_FROZEN
 }
 
@@ -17,9 +17,10 @@ enum class TrainingMode {
  *
  * Supports two training modes:
  *   - HEAD_ONLY: Only the linear head (TrainableHead) is trained
- *   - SEMI_FROZEN: Both Conv+BN (lower LR) and head (higher LR) are trained
+ *   - SEMI_FROZEN: Both Conv weights (lower LR) and head (higher LR) are trained; BN params are frozen
  *
- * In SEMI_FROZEN mode, the learning rate for Conv+BN is scaled down by [backboneLrRatio].
+ * In SEMI_FROZEN mode, the learning rate for Conv weights is scaled down by [backboneLrRatio].
+ * BN parameters (gamma, beta) are always frozen to avoid training instability.
  *
  * All gradient computation is hand-written without autograd.
  */

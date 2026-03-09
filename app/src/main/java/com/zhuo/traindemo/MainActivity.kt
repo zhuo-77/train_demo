@@ -27,7 +27,9 @@ import androidx.core.content.ContextCompat
 import com.zhuo.traindemo.data.Dataset
 import com.zhuo.traindemo.model.FeatureExtractor
 import com.zhuo.traindemo.model.ModelManager
+import com.zhuo.traindemo.model.TrainableClassifier
 import com.zhuo.traindemo.model.TrainableHead
+import com.zhuo.traindemo.model.TrainingMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -47,22 +49,26 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnTrain: Button
     private lateinit var btnAddClass: Button
     private lateinit var spinnerLabel: Spinner
+    private lateinit var spinnerTrainMode: Spinner
     private lateinit var progressBar: ProgressBar
 
     private val dataset = Dataset()
     private lateinit var featureExtractor: FeatureExtractor
     private var trainableHead: TrainableHead? = null
+    private var trainableClassifier: TrainableClassifier? = null
     private lateinit var modelManager: ModelManager
 
     private val classLabels = mutableListOf("Class 0", "Class 1")
     private lateinit var labelAdapter: ArrayAdapter<String>
+    private val trainingModes = listOf("Head Only", "Semi-Frozen")
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private var isTraining = false
     private var isAnalyzing = true
 
-    // Model parameters
-    private val featureChannels = 320 // ConvNeXt Atto
+    // Model parameters for YOLOv8n-cls backbone
+    private val featureChannels = 256  // YOLOv8n-cls backbone output channels
+    private val convOutChannels = 1280 // Classify Conv output channels
     private val featureHeight = 7
     private val featureWidth = 7
 
@@ -87,29 +93,44 @@ class MainActivity : AppCompatActivity() {
         btnTrain = findViewById(R.id.btnTrain)
         btnAddClass = findViewById(R.id.btnAddClass)
         spinnerLabel = findViewById(R.id.spinnerLabel)
+        spinnerTrainMode = findViewById(R.id.spinnerTrainMode)
         progressBar = findViewById(R.id.progressBar)
 
-        // Initialize Spinner
+        // Initialize Label Spinner
         labelAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, classLabels)
         labelAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinnerLabel.adapter = labelAdapter
+
+        // Initialize Training Mode Spinner
+        val modeAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, trainingModes)
+        modeAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spinnerTrainMode.adapter = modeAdapter
 
         // Initialize Feature Extractor
         try {
             featureExtractor = FeatureExtractor(this)
             modelManager = ModelManager(this)
 
-            // Try to load model
-            val loaded = modelManager.loadModel()
-            if (loaded != null) {
-                trainableHead = loaded.first
+            // Try to load saved classifier first, then fall back to head-only model
+            val loadedClassifier = modelManager.loadClassifier()
+            if (loadedClassifier != null) {
+                trainableClassifier = loadedClassifier.first
+                trainableHead = loadedClassifier.first.head
                 classLabels.clear()
-                classLabels.addAll(loaded.second)
+                classLabels.addAll(loadedClassifier.second)
                 labelAdapter.notifyDataSetChanged()
-                Toast.makeText(this, "Loaded saved model", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Loaded saved classifier", Toast.LENGTH_SHORT).show()
             } else {
-                // Initialize Head
-                trainableHead = TrainableHead(featureChannels, classLabels.size)
+                val loaded = modelManager.loadModel()
+                if (loaded != null) {
+                    trainableHead = loaded.first
+                    classLabels.clear()
+                    classLabels.addAll(loaded.second)
+                    labelAdapter.notifyDataSetChanged()
+                    Toast.makeText(this, "Loaded saved model", Toast.LENGTH_SHORT).show()
+                }
+                // Initialize Classifier with pretrained Conv+BN weights
+                initClassifier()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing models", e)
@@ -235,10 +256,10 @@ class MainActivity : AppCompatActivity() {
         val startTime = System.currentTimeMillis()
 
         try {
-            if (trainableHead != null && !isTraining) {
+            if (trainableClassifier != null && !isTraining) {
                 val features = featureExtractor.extract(rotatedBitmap)
-                // Head expects: input, batch, channels, h, w
-                val logits = trainableHead!!.forward(features, 1, featureChannels, featureHeight, featureWidth)
+                // Classifier expects: backboneFeatures, batch, height, width
+                val logits = trainableClassifier!!.forward(features, 1, featureHeight, featureWidth)
 
                 // Argmax
                 var maxIdx = -1
@@ -289,6 +310,16 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        val classifier = trainableClassifier
+        if (classifier == null) {
+            Toast.makeText(this, "Classifier not initialized!", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Determine training mode from spinner
+        val trainingMode = if (spinnerTrainMode.selectedItemPosition == 0)
+            TrainingMode.HEAD_ONLY else TrainingMode.SEMI_FROZEN
+
         isTraining = true
         isAnalyzing = false // Pause inference updates
         btnTrain.text = "Stop"
@@ -306,6 +337,8 @@ class MainActivity : AppCompatActivity() {
             val initialLr = 0.001f
             val minLr = 0.00001f
 
+            val modeLabel = if (trainingMode == TrainingMode.HEAD_ONLY) "Head Only" else "Semi-Frozen"
+
             var epoch = 0
             while (isTraining && epoch < epochs) {
                 epoch++
@@ -317,39 +350,31 @@ class MainActivity : AppCompatActivity() {
                 val batch = dataset.getBatch(batchSize)
                 if (batch.isEmpty()) continue
 
-                var totalLoss = 0f
-
-                // Process batch
-                // We need to stack inputs. This is inefficient in pure Kotlin loop, but works for demo.
-                // Better: Pre-extract features for dataset if possible, but we have augmentation.
-                // So: Augment -> Extract -> Stack -> TrainStep.
-
-                // To support batching in TrainableHead, we need to flatten the whole batch into one array.
-                // Input size: Batch * Channels * H * W
+                // Extract features and stack into batch
                 val batchInput = FloatArray(batchSize * featureChannels * featureHeight * featureWidth)
                 val batchTargets = IntArray(batchSize)
 
                 for (i in 0 until batchSize) {
                     val item = batch[i]
-                    val features = featureExtractor.extract(item.bitmap) // Returns [C*H*W]
+                    val features = featureExtractor.extract(item.bitmap)
                     System.arraycopy(features, 0, batchInput, i * features.size, features.size)
                     batchTargets[i] = item.label
                 }
 
-                // Train step
-                val loss = trainableHead!!.trainStep(
+                // Train step with selected mode
+                val loss = classifier.trainStep(
                     batchInput,
                     batchSize,
-                    featureChannels,
                     featureHeight,
                     featureWidth,
                     batchTargets,
                     lr,
+                    trainingMode,
                     labelSmoothing = 0.1f
                 )
 
                 withContext(Dispatchers.Main) {
-                    txtStatus.text = "Epoch $epoch/$epochs, Loss: ${String.format("%.4f", loss)}"
+                    txtStatus.text = "[$modeLabel] Epoch $epoch/$epochs, Loss: ${String.format("%.4f", loss)}"
                     progressBar.progress = epoch
                 }
 
@@ -370,12 +395,11 @@ class MainActivity : AppCompatActivity() {
         btnTrain.text = "Train"
         btnCapture.isEnabled = true
         progressBar.visibility = View.GONE
-        // trainingJob?.cancel() // Don't cancel immediately if called from within the job
 
-        // Save model
-        trainableHead?.let {
-            modelManager.saveModel(it, classLabels)
-            Toast.makeText(this, "Model Saved", Toast.LENGTH_SHORT).show()
+        // Save classifier
+        trainableClassifier?.let {
+            modelManager.saveClassifier(it, classLabels)
+            Toast.makeText(this, "Classifier Saved", Toast.LENGTH_SHORT).show()
         }
 
         // Resume camera
@@ -394,11 +418,34 @@ class MainActivity : AppCompatActivity() {
         classLabels.add("Class $newClassIndex")
         labelAdapter.notifyDataSetChanged()
 
-        // Re-initialize head to accommodate new class (naive approach: reset weights)
-        // In a real app, we might want to keep existing weights or use a flexible head.
-        // For this demo, we reset.
-        trainableHead = TrainableHead(featureChannels, classLabels.size)
-        Toast.makeText(this, "Added Class $newClassIndex. Model Reset.", Toast.LENGTH_SHORT).show()
+        // Re-initialize classifier to accommodate new class
+        initClassifier()
+        Toast.makeText(this, "Added Class $newClassIndex. Head Reset.", Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * Initialize or re-initialize the TrainableClassifier.
+     * Tries to load pretrained Conv+BN weights from assets;
+     * the linear head is always re-initialized for the current number of classes.
+     */
+    private fun initClassifier() {
+        val pretrainedConv = modelManager.loadPretrainedConvWeights("yolov8n_cls_head_weights.bin")
+        val classifier = TrainableClassifier(featureChannels, convOutChannels, classLabels.size)
+
+        if (pretrainedConv != null) {
+            // Use pretrained Conv+BN weights
+            classifier.convBlock.convWeight = pretrainedConv.convWeight
+            classifier.convBlock.bnGamma = pretrainedConv.bnGamma
+            classifier.convBlock.bnBeta = pretrainedConv.bnBeta
+            classifier.convBlock.bnRunningMean = pretrainedConv.bnRunningMean
+            classifier.convBlock.bnRunningVar = pretrainedConv.bnRunningVar
+            Log.d(TAG, "Loaded pretrained Conv+BN weights")
+        } else {
+            Log.w(TAG, "Pretrained Conv+BN weights not found, using random initialization")
+        }
+
+        trainableClassifier = classifier
+        trainableHead = classifier.head
     }
 
     companion object {

@@ -82,6 +82,27 @@ class TrainableHead(val inputDim: Int, val numClasses: Int) {
      * Targets: Class indices [Batch]
      */
     fun trainStep(input: FloatArray, batchSize: Int, channels: Int, height: Int, width: Int, targets: IntArray, learningRate: Float, labelSmoothing: Float = 0.1f): Float {
+        return trainStepWithGrad(input, batchSize, channels, height, width, targets, learningRate, labelSmoothing).first
+    }
+
+    /**
+     * Training result containing loss and optional input gradient.
+     */
+    data class TrainResult(val loss: Float, val inputGrad: FloatArray?)
+
+    /**
+     * Backward pass and Update, with optional input gradient computation.
+     *
+     * When computeInputGrad is true, also computes dL/dInput for backpropagation
+     * through upstream layers (used in semi-frozen training mode).
+     *
+     * @return Pair(loss, dInput) where dInput is null if computeInputGrad is false
+     */
+    fun trainStepWithGrad(
+        input: FloatArray, batchSize: Int, channels: Int, height: Int, width: Int,
+        targets: IntArray, learningRate: Float, labelSmoothing: Float = 0.1f,
+        computeInputGrad: Boolean = false
+    ): Pair<Float, FloatArray?> {
         // 1. GAP
         var gapOutput = globalAveragePool(input, batchSize, channels, height, width)
 
@@ -192,13 +213,46 @@ class TrainableHead(val inputDim: Int, val numClasses: Int) {
             for(i in dBias.indices) dBias[i] *= scale
         }
 
-        // 6. Update (AdamW)
+        // 6. Compute input gradient if requested (for semi-frozen training)
+        var dInput: FloatArray? = null
+        if (computeInputGrad) {
+            // dL/dGapOutput[b, i] = sum_j(dLogits[b, j] * weights[i * numClasses + j])
+            val dGapOutput = FloatArray(gapOutput.size)
+            for (b in 0 until batchSize) {
+                for (i in 0 until channels) {
+                    var gradSum = 0f
+                    for (j in 0 until numClasses) {
+                        gradSum += dLogits[b * numClasses + j] * weights[i * numClasses + j]
+                    }
+                    // Apply dropout mask (backprop through dropout)
+                    dGapOutput[b * channels + i] = gradSum * dropoutMask[b * channels + i]
+                }
+            }
+
+            // dL/dInput[b, c, h, w] = dL/dGapOutput[b, c] / (H * W)
+            // (backprop through global average pooling)
+            val spatialSize = (height * width).toFloat()
+            dInput = FloatArray(input.size)
+            for (b in 0 until batchSize) {
+                for (c in 0 until channels) {
+                    val grad = dGapOutput[b * channels + c] / spatialSize
+                    for (h in 0 until height) {
+                        for (w in 0 until width) {
+                            val idx = b * (channels * height * width) + c * (height * width) + h * width + w
+                            dInput[idx] = grad
+                        }
+                    }
+                }
+            }
+        }
+
+        // 7. Update (AdamW)
         t++
         // AdamW: Decay weights before Adam update, but only if applyDecay is true
         adamWUpdate(weights, dWeights, mWeights, vWeights, learningRate, applyDecay = true)
         adamWUpdate(bias, dBias, mBias, vBias, learningRate, applyDecay = false) // Usually no weight decay on bias
 
-        return totalLoss / batchSize
+        return Pair(totalLoss / batchSize, dInput)
     }
 
     private fun globalAveragePool(input: FloatArray, batchSize: Int, channels: Int, height: Int, width: Int): FloatArray {

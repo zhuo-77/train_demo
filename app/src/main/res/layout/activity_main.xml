@@ -105,6 +105,24 @@
                 android:layout_height="wrap_content"
                 android:minHeight="48dp" />
 
+            <Spinner
+                android:id="@+id/spinnerBackbone"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp" />
+        </LinearLayout>
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="8dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
             <Button
                 android:id="@+id/btnAddClass"
                 android:layout_width="wrap_content"

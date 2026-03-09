@@ -86,11 +86,6 @@ class TrainableHead(val inputDim: Int, val numClasses: Int) {
     }
 
     /**
-     * Training result containing loss and optional input gradient.
-     */
-    data class TrainResult(val loss: Float, val inputGrad: FloatArray?)
-
-    /**
      * Backward pass and Update, with optional input gradient computation.
      *
      * When computeInputGrad is true, also computes dL/dInput for backpropagation

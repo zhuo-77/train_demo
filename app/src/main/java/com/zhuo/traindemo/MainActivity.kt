@@ -67,7 +67,7 @@ class MainActivity : AppCompatActivity() {
     private var isAnalyzing = true
 
     // Model parameters for YOLOv8n-cls backbone
-    private val featureChannels = 256  // YOLOv8n-cls backbone output channels
+    private val backboneChannels = 256  // YOLOv8n-cls backbone output channels
     private val convOutChannels = 1280 // Classify Conv output channels
     private val featureHeight = 7
     private val featureWidth = 7
@@ -351,7 +351,7 @@ class MainActivity : AppCompatActivity() {
                 if (batch.isEmpty()) continue
 
                 // Extract features and stack into batch
-                val batchInput = FloatArray(batchSize * featureChannels * featureHeight * featureWidth)
+                val batchInput = FloatArray(batchSize * backboneChannels * featureHeight * featureWidth)
                 val batchTargets = IntArray(batchSize)
 
                 for (i in 0 until batchSize) {
@@ -430,7 +430,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun initClassifier() {
         val pretrainedConv = modelManager.loadPretrainedConvWeights("yolov8n_cls_head_weights.bin")
-        val classifier = TrainableClassifier(featureChannels, convOutChannels, classLabels.size)
+        val classifier = TrainableClassifier(backboneChannels, convOutChannels, classLabels.size)
 
         if (pretrainedConv != null) {
             // Use pretrained Conv+BN weights

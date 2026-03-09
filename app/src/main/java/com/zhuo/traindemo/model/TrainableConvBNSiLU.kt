@@ -90,11 +90,22 @@ class TrainableConvBNSiLU(val inChannels: Int, val outChannels: Int) {
         // Backward through SiLU
         val dBnOut = siluBackward(bnOut, dOutput)
 
-        // Backward through BatchNorm (eval mode)
-        val dConvOut = batchNormBackward(convOut, dBnOut, batchSize, height, width, learningRate)
+        // Backward through BatchNorm (eval mode) — compute gradients only
+        val (dConvOut, dGamma, dBeta) = batchNormBackwardGrads(convOut, dBnOut, batchSize, height, width)
 
-        // Backward through Conv2d(1x1)
-        val dInput = conv1x1Backward(input, dConvOut, batchSize, height, width, learningRate)
+        // Backward through Conv2d(1x1) — compute gradients only
+        val (dInput, dWeight) = conv1x1BackwardGrads(input, dConvOut, batchSize, height, width)
+
+        // Clip all gradients together
+        clipGradients(dWeight, dGamma, dBeta)
+
+        // Increment step counter once for all parameter groups
+        t++
+
+        // Update all parameters
+        adamWUpdate(convWeight, dWeight, mConvW, vConvW, learningRate, applyDecay = true)
+        adamWUpdate(bnGamma, dGamma, mBnGamma, vBnGamma, learningRate, applyDecay = false)
+        adamWUpdate(bnBeta, dBeta, mBnBeta, vBnBeta, learningRate, applyDecay = false)
 
         return dInput
     }
@@ -129,13 +140,12 @@ class TrainableConvBNSiLU(val inChannels: Int, val outChannels: Int) {
 
     /**
      * Backward through Conv2d(1x1).
-     * Computes dWeight and dInput, updates conv weights.
+     * Computes dWeight and dInput (no parameter update).
      */
-    private fun conv1x1Backward(
+    private fun conv1x1BackwardGrads(
         input: FloatArray, dOutput: FloatArray,
-        batchSize: Int, height: Int, width: Int,
-        learningRate: Float
-    ): FloatArray {
+        batchSize: Int, height: Int, width: Int
+    ): Pair<FloatArray, FloatArray> {
         val dWeight = FloatArray(convWeight.size)
         val dInput = FloatArray(input.size)
 
@@ -164,14 +174,7 @@ class TrainableConvBNSiLU(val inChannels: Int, val outChannels: Int) {
         val scale = 1.0f / batchSize
         for (i in dWeight.indices) dWeight[i] *= scale
 
-        // Gradient clipping
-        clipGradients(dWeight)
-
-        // Update conv weights
-        t++  // Shared step counter
-        adamWUpdate(convWeight, dWeight, mConvW, vConvW, learningRate, applyDecay = true)
-
-        return dInput
+        return Pair(dInput, dWeight)
     }
 
     // ---- BatchNorm (eval mode) ----
@@ -202,13 +205,12 @@ class TrainableConvBNSiLU(val inChannels: Int, val outChannels: Int) {
 
     /**
      * Backward through eval-mode BatchNorm.
-     * Only gamma and beta are trainable.
+     * Computes gradients for gamma, beta and dInput (no parameter update).
      */
-    private fun batchNormBackward(
+    private fun batchNormBackwardGrads(
         input: FloatArray, dOutput: FloatArray,
-        batchSize: Int, height: Int, width: Int,
-        learningRate: Float
-    ): FloatArray {
+        batchSize: Int, height: Int, width: Int
+    ): Triple<FloatArray, FloatArray, FloatArray> {
         val dGamma = FloatArray(outChannels)
         val dBeta = FloatArray(outChannels)
         val dInput = FloatArray(input.size)
@@ -237,14 +239,7 @@ class TrainableConvBNSiLU(val inChannels: Int, val outChannels: Int) {
         for (i in dGamma.indices) dGamma[i] *= scale
         for (i in dBeta.indices) dBeta[i] *= scale
 
-        // Gradient clipping
-        clipGradients(dGamma, dBeta)
-
-        // Update BN parameters (gamma, beta)
-        adamWUpdate(bnGamma, dGamma, mBnGamma, vBnGamma, learningRate, applyDecay = false)
-        adamWUpdate(bnBeta, dBeta, mBnBeta, vBnBeta, learningRate, applyDecay = false)
-
-        return dInput
+        return Triple(dInput, dGamma, dBeta)
     }
 
     // ---- SiLU activation ----

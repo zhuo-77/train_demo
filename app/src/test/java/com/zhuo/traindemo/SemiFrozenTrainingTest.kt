@@ -419,9 +419,11 @@ class SemiFrozenTrainingTest {
 
         // Conv weights SHOULD change, but BN params should NOT
         var convChanged = false
+        val initConv = floatArrayOf(1f, 0f, 0f, 1f, 1f, 1f)
         for (i in classifier.convBlock.convWeight.indices) {
-            if (classifier.convBlock.convWeight[i] != 0f) convChanged = true
+            if (classifier.convBlock.convWeight[i] != initConv[i]) convChanged = true
         }
+        assertTrue("Conv weights should change in SEMI_FROZEN mode", convChanged)
 
         assertArrayEquals("BN gamma should not change in SEMI_FROZEN mode",
             bnGammaBefore, classifier.convBlock.bnGamma, 0f)
